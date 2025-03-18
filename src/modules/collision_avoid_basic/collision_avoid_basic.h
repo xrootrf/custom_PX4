@@ -68,7 +68,7 @@
 	 /** @see ModuleBase::print_status() */
 	 int print_status() override;
 
-	 bool changeFlightModeToLoiter(void);
+	 bool changeFlightMode(int main_mode, int sub_mode);
 
 	 void startProtect(int instance_num);
 
@@ -77,6 +77,8 @@
 	 float getClosestDistance(void);
 
 	 void parameters_update(bool force);
+
+	 void detectFlightMode(int fmode);
 
  private:
 

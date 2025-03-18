@@ -33,7 +33,7 @@
 px4_add_module(
 	MODULE modules__collision_avoid_basic
 	MAIN collision_avoid_basic
-	STACK_MAIN 2000
+	STACK_MAIN 1500
 
 	SRCS
 		collision_avoid_basic.cpp

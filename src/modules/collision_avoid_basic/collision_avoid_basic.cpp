@@ -40,6 +40,8 @@
 #include <uORB/topics/distance_sensor.h>
 
 #include <uORB/topics/vehicle_command.h>
+#define DEFINE_GET_PX4_CUSTOM_MODE
+#include <uORB/topics/vehicle_status.h>
 #include <uORB/Publication.hpp>
 #include <lib/modes/standard_modes.hpp>
 #include <commander/px4_custom_mode.h>
@@ -49,6 +51,10 @@
 
 bool number_of_occurences = 0;	//used to set loiter cmd only once
 bool disable_hold = false;
+
+bool tooClose = false;
+int prev_main_mode = 0;
+int prev_sub_mode = 0;
 
 int CollisionAvoidBasic::print_status()
 {
@@ -147,6 +153,8 @@ void CollisionAvoidBasic::run()
 	int sensor_sub_fd_2 = orb_subscribe_multi(ORB_ID(distance_sensor), 1);
 	int sensor_sub_fd_3 = orb_subscribe_multi(ORB_ID(distance_sensor), 2);
 
+	int flightmode = orb_subscribe(ORB_ID(vehicle_status));
+
 	px4_pollfd_struct_t fds[1];
 	fds[0].fd = sensor_sub_fd_1;
 	fds[0].events = POLLIN;
@@ -158,7 +166,7 @@ void CollisionAvoidBasic::run()
 
 
 		// wait for up to 50ms for data
-		int pret = px4_poll(fds, (sizeof(fds) / sizeof(fds[0])), 1000);
+		int pret = px4_poll(fds, (sizeof(fds) / sizeof(fds[0])), 50);
 
 		if (pret == 0) {
 			// Timeout: let the loop run anyway, don't do `continue` here
@@ -170,6 +178,8 @@ void CollisionAvoidBasic::run()
 			continue;
 
 		} else if (fds[0].revents & POLLIN) {
+
+			detectFlightMode(flightmode);
 
 			struct distance_sensor_s raw_1;
 			struct distance_sensor_s raw_2;
@@ -190,6 +200,8 @@ void CollisionAvoidBasic::run()
 			}
 			else{
 				number_of_occurences = 0;
+				changeFlightMode(prev_main_mode, prev_sub_mode);	//go back to mode before avoidance
+				tooClose = false;
 			}
 
 		}
@@ -217,20 +229,27 @@ void CollisionAvoidBasic::parameters_update(bool force)	//basically sets closest
 
 }
 
-// void CollisionAvoidBasic::px4_send_log(char* msg_to_send)
-// {
-// 	// we need to advertise with a valid message
-// 	log_message_s log_message{};
-// 	log_message.severity = 6; // info
-// 	strcpy((char *)log_message.text, msg_to_send);
-// 	log_message.timestamp = hrt_absolute_time();
-// 	orb_log_message_pub = orb_advertise(ORB_ID(log_message), &log_message);
-// }
+//implement vehicle status tracking so we cannot accidentally switch to a flying mode if too close
+void CollisionAvoidBasic::detectFlightMode(int fmode){
+	struct vehicle_status_s fmodeRaw;
+	orb_copy(ORB_ID(vehicle_status), fmode, &fmodeRaw);
+
+	px4_custom_mode currFltMode = get_px4_custom_mode(fmodeRaw.nav_state);
+
+	if(!tooClose){
+		prev_main_mode = currFltMode.main_mode;
+		prev_sub_mode = currFltMode.sub_mode;
+	}else{
+		number_of_occurences = 0;	//implies that something tried to change the hold mode, so we change it back
+	}
+
+}
 
 void CollisionAvoidBasic::startProtect(int instance_num){
+	tooClose = true;
 	if(!disable_hold){
 		if(number_of_occurences == 0){
-			bool flightModeStatus = changeFlightModeToLoiter();
+			bool flightModeStatus = changeFlightMode(4, 3);	//loiter command
 			switch(flightModeStatus){
 				case 1:
 					// px4_send_log("flight mode changed successfully, instance %d too close", instance_num);
@@ -246,13 +265,13 @@ void CollisionAvoidBasic::startProtect(int instance_num){
 	}
 }
 
-bool CollisionAvoidBasic::changeFlightModeToLoiter(void)		//called if too close or data is stale
+bool CollisionAvoidBasic::changeFlightMode(int main_mode, int sub_mode)		//called if too close or data is stale
 {
 	vehicle_command_s vcmd{};
 	vcmd.command = vehicle_command_s::VEHICLE_CMD_DO_SET_MODE;
 	vcmd.param1 = 1.0f;
-	vcmd.param2 = (float)PX4_CUSTOM_MAIN_MODE_AUTO;
-	vcmd.param3 = (float)PX4_CUSTOM_SUB_MODE_AUTO_LOITER;
+	vcmd.param2 = (float)main_mode;
+	vcmd.param3 = (float)sub_mode;
 	vcmd.param4 = 0.0f;
 	vcmd.param5 = 0.0f;
 	vcmd.param6 = 0.0f;

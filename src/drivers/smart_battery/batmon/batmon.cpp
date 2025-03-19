@@ -44,17 +44,35 @@
 #include "batmon.h"
 #include <mathlib/mathlib.h>
 #include <lib/atmosphere/atmosphere.h>
+#include <parameters/param.h>
+#include <uORB/uORB.h>
+#include <uORB/topics/battery_status.h>
+#include <px4_platform_common/px4_config.h>
+#include <px4_platform_common/getopt.h>
+#include <px4_platform_common/module.h>
+
 
 extern "C" __EXPORT int batmon_main(int argc, char *argv[]);
 
-Batmon::Batmon(const I2CSPIDriverConfig &config, SMBus *interface):
-	SMBUS_SBS_BaseClass(config, interface)
+Batmon::Batmon(const I2CSPIDriverConfig &config, BATMAN *interface) :
+	I2CSPIDriver(config),
+	_interface(interface)
 {
 }
 
+// Batmon::~Batmon()
+// {
+// 	// Unadvertise the distance sensor topic.
+// 	if (_battery_status_pub != nullptr) {
+// 		orb_unadvertise(_battery_status_pub);
+// 	}
+
+// }
+
 I2CSPIDriverBase *Batmon::instantiate(const I2CSPIDriverConfig &config, int runtime_instance)
 {
-	SMBus *interface = new SMBus(config.devid_driver_index, config.bus, config.i2c_address);
+	BATMAN *interface = batmon_i2c_interface(config.bus, config.i2c_address, config.bus_frequency);
+
 
 	int32_t batmon_en_param = 0;
 	param_get(param_find("BATMON_DRIVER_EN"), &batmon_en_param);
@@ -75,20 +93,20 @@ I2CSPIDriverBase *Batmon::instantiate(const I2CSPIDriverConfig &config, int runt
 		return nullptr;
 	}
 
-	int ret = instance->get_startup_info();
-	ret |= instance->get_batmon_startup_info();
+	// int ret = instance->get_startup_info();
+	// ret |= instance->get_batmon_startup_info();
 
-	if (ret != PX4_OK) {
-		delete instance;
-		return nullptr;
-	}
+	// if (ret != PX4_OK) {
+	// 	delete instance;
+	// 	return nullptr;
+	// }
 
 
 	// Setting the BAT_SOURCE to "external"
 	int32_t battsource = 1;
 	param_set(param_find("BAT_SOURCE"), &battsource);
 
-	instance->ScheduleOnInterval(SBS_MEASUREMENT_INTERVAL_US);
+	instance->ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
 
 	return instance;
 }
@@ -124,7 +142,7 @@ void Batmon::RunImpl()
 	int ret = PX4_OK;
 
 	// Temporary variable for storing SMBUS reads.
-	uint16_t result;
+	uint8_t result;		//prev was uint16_t
 
 	// Read data from sensor.
 	battery_status_s new_report = {};
@@ -136,67 +154,58 @@ void Batmon::RunImpl()
 
 	new_report.connected = true;
 
-	ret |= _interface->read_word(BATT_SMBUS_VOLTAGE, result);
+	ret |= _interface->get_reg(BATT_SMBUS_VOLTAGE, &result);
 
-	ret |= get_cell_voltages();
-
-	for (int i = 0; i < _cell_count; i++) {
-		new_report.voltage_cell_v[i] = _cell_voltages[i];
-	}
+	// for (int i = 0; i < _cell_count; i++) {
+	// 	new_report.voltage_cell_v[i] = 65535;
+	// }
 
 	// Convert millivolts to volts.
 	new_report.voltage_v = ((float)result) / 1000.0f;
 	new_report.voltage_filtered_v = new_report.voltage_v;
 
 	// Read current.
-	ret |= _interface->read_word(BATT_SMBUS_CURRENT, result);
+	ret |= _interface->get_reg(BATT_SMBUS_CURRENT, &result);
 
-	new_report.current_a = (-1.0f * ((float)(*(int16_t *)&result)) / 1000.0f);
+	new_report.current_a = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
 	new_report.current_filtered_a = new_report.current_a;
 
 	// Read average current.
-	ret |= _interface->read_word(BATT_SMBUS_AVERAGE_CURRENT, result);
+	ret |= _interface->get_reg(BATT_SMBUS_AVERAGE_CURRENT, &result);
 
-	float average_current = (-1.0f * ((float)(*(int16_t *)&result)) / 1000.0f);
+	float average_current = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
 
 	new_report.current_average_a = average_current;
 
-	// Read run time to empty (minutes).
-	ret |= _interface->read_word(BATT_SMBUS_RUN_TIME_TO_EMPTY, result);
-	new_report.time_remaining_s = result * 60;
-
 	// Read average time to empty (minutes).
-	ret |= _interface->read_word(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, result);
+	ret |= _interface->get_reg(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, &result);
 	new_report.average_time_to_empty = result;
 
 	// Read remaining capacity.
-	ret |= _interface->read_word(BATT_SMBUS_REMAINING_CAPACITY, result);
-
-	// Calculate total discharged amount in mah.
-	new_report.discharged_mah = _batt_startup_capacity - (float)result;
+	ret |= _interface->get_reg(BATT_SMBUS_REMAINING_CAPACITY, &result);
 
 	// Read Relative SOC.
-	ret |= _interface->read_word(BATT_SMBUS_RELATIVE_SOC, result);
+	ret |= _interface->get_reg(BATT_SMBUS_ABSOLUTE_SOC, &result);
 
 	// Normalize 0.0 to 1.0
 	new_report.remaining = (float)result / 100.0f;
 
 	// Read Max Error
-	//ret |= _interface->read_word(BATT_SMBUS_MAX_ERROR, result); //TODO: to be implemented
+	//ret |= _interface->get_reg(BATT_SMBUS_MAX_ERROR, result); //TODO: to be implemented
 	//new_report.max_error = result;
 
 	// Read battery temperature and covert to Celsius.
-	ret |= _interface->read_word(BATT_SMBUS_TEMP, result);
+	ret |= _interface->get_reg(BATT_SMBUS_TEMP, &result);
 	new_report.temperature = ((float)result / 10.0f) + atmosphere::kAbsoluteNullCelsius;
 
 	// Only publish if no errors.
 	if (ret == PX4_OK) {
-		new_report.capacity = _batt_capacity;
-		new_report.cycle_count = _cycle_count;
-		new_report.serial_number = _serial_number;
+		// new_report.capacity = _batt_capacity;
+		// new_report.cycle_count = _cycle_count;
+		// new_report.serial_number = _serial_number;
 		new_report.max_cell_voltage_delta = _max_cell_voltage_delta;
-		new_report.cell_count = _cell_count;
-		new_report.state_of_health = _state_of_health;
+		// new_report.cell_count = _cell_count;
+		// new_report.state_of_health = _state_of_health;
 
 		// TODO: This critical setting should be set with BMS info or through a paramter
 		// Setting a hard coded BATT_CELL_VOLTAGE_THRESHOLD_FAILED may not be appropriate
@@ -216,7 +225,7 @@ void Batmon::RunImpl()
 			new_report.warning = battery_status_s::BATTERY_WARNING_EMERGENCY;
 		}
 
-		new_report.interface_error = perf_event_count(_interface->_interface_errors);
+		// new_report.interface_error = perf_event_count(_interface->_interface_errors);
 
 		int instance = 0;
 		orb_publish_auto(ORB_ID(battery_status), &_batt_topic, &new_report, &instance);
@@ -234,13 +243,13 @@ int Batmon::get_batmon_startup_info()
 	param_get(param_find("BAT_LOW_THR"), &_low_thr);
 	param_get(param_find("BAT_EMERGEN_THR"), &_emergency_thr);
 
-	// Read BatMon specific data
-	uint16_t num_cells;
-	ret = _interface->read_word(BATT_SMBUS_CELL_COUNT, num_cells);
-	_cell_count = math::min((uint8_t)num_cells, (uint8_t)MAX_CELL_COUNT);
+	// Read BatMon specific data	do later
+	// uint16_t num_cells;
+	// ret = _interface->get_reg(BATT_SMBUS_CELL_COUNT, num_cells);
+	// _cell_count = math::min((uint8_t)num_cells, (uint8_t)MAX_CELL_COUNT);
 
-	int32_t _num_cells = num_cells;
-	param_set(param_find("BAT_N_CELLS"), &_num_cells);
+	// int32_t _num_cells = num_cells;
+	// param_set(param_find("BAT_N_CELLS"), &_num_cells);
 
 	return ret;
 }
@@ -250,54 +259,25 @@ void Batmon::custom_method(const BusCLIArguments &cli)
 	switch(cli.custom1) {
 		case 1:
 			// TODO: analyze why these statements are not printed
-			PX4_INFO("The manufacturer name: %s", _manufacturer_name);
-			PX4_INFO("The manufacturer date: %d", _manufacture_date);
-			PX4_INFO("The serial number: %d", _serial_number);
+			// PX4_INFO("The manufacturer name: %s", _manufacturer_name);
+			// PX4_INFO("The manufacturer date: %d", _manufacture_date);
+			// PX4_INFO("The serial number: %d", _serial_number);
 			break;
 		case 4:
-			suspend();
+			// suspend();
 			break;
 		case 5:
-			resume();
+			// resume();
 			break;
 	}
 }
 
-
-int Batmon::get_cell_voltages()
-{
-	// Temporary variable for storing SMBUS reads.
-	uint16_t result = 0;
-	uint8_t ret = 0;
-
-	// Making the assumption that the register value of BATT_SMBUS_CELL_1_VOLTAGE and BATT_SMBUS_CELL_10_VOLTAGE are sequential and decreasing order.
-	for (int i = 0 ; i < _cell_count; i++) {
-		ret |= _interface->read_word(BATT_SMBUS_CELL_1_VOLTAGE - i, result);
-		// Convert millivolts to volts.
-		_cell_voltages[i] = ((float)result) * 0.001f;
-	}
-
-	//Calculate max cell delta
-	_min_cell_voltage = _cell_voltages[0];
-	float max_cell_voltage = _cell_voltages[0];
-
-	for (uint8_t i = 1; (i < _cell_count && i < (sizeof(_cell_voltages) / sizeof(_cell_voltages[0]))); i++) {
-		_min_cell_voltage = math::min(_min_cell_voltage, _cell_voltages[i]);
-		max_cell_voltage = math::max(max_cell_voltage, _cell_voltages[i]);
-	}
-
-	// Calculate the max difference between the min and max cells with complementary filter.
-	_max_cell_voltage_delta = (0.5f * (max_cell_voltage - _min_cell_voltage)) +
-				  (0.5f * _last_report.max_cell_voltage_delta);
-
-	return ret;
-}
 
 extern "C" __EXPORT int batmon_main(int argc, char *argv[])
 {
 	using ThisDriver = Batmon;
 	BusCLIArguments cli{true, false};
-	cli.default_i2c_frequency = 100000;
+	cli.default_i2c_frequency = 400000;
 
 	int32_t batmon_addr_batt1 = BATMON_DEFAULT_SMBUS_ADDR;
 	param_get(param_find("BATMON_ADDR_DFLT"), &batmon_addr_batt1);

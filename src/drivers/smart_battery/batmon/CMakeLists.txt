@@ -36,6 +36,7 @@ px4_add_module(
 	MAIN batmon
 	COMPILE_FLAGS
 	SRCS
+		batmon_i2c.cpp
 		batmon.cpp
 
 	DEPENDS

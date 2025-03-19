@@ -1,5 +1,5 @@
 menuconfig DRIVERS_SMART_BATTERY_BATMON
 	bool "batmon"
-	default n
+	default y
 	---help---
 		Enable support for batmon

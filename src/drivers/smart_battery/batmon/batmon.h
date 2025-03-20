@@ -55,47 +55,11 @@
 
 #define BATT_SMBUS_MEASUREMENT_INTERVAL_US              100//_ms         ///< time in microseconds, measure at 10Hz
 
-#define MAC_DATA_BUFFER_SIZE                            32
-
 #define BATT_CELL_VOLTAGE_THRESHOLD_RTL                 0.5f            ///< Threshold in volts to RTL if cells are imbalanced
 #define BATT_CELL_VOLTAGE_THRESHOLD_FAILED              1.5f            ///< Threshold in volts to Land if cells are imbalanced
 
-#define BATT_CURRENT_UNDERVOLTAGE_THRESHOLD             5.0f            ///< Threshold in amps to disable undervoltage protection
-#define BATT_VOLTAGE_UNDERVOLTAGE_THRESHOLD             3.4f            ///< Threshold in volts to re-enable undervoltage protection
+// #define BATT_SMBUS_ADDR                                 0x55            ///< Default 7 bit address I2C address. 8 bit = 0x16
 
-#define BATT_SMBUS_ADDR                                 0x55            ///< Default 7 bit address I2C address. 8 bit = 0x16
-
-// #define BATT_SMBUS_RUN_TIME_TO_EMPTY                    0x11            ///< predicted remaining battery capacity based on the present rate of discharge in min
-// #define BATT_SMBUS_DESIGN_VOLTAGE                       0x19            ///< design voltage register
-
-// #define BATT_SMBUS_BQ40Z50_CELL_4_VOLTAGE               0x3C
-// #define BATT_SMBUS_BQ40Z50_CELL_3_VOLTAGE               0x3D
-// #define BATT_SMBUS_BQ40Z50_CELL_2_VOLTAGE               0x3E
-// #define BATT_SMBUS_BQ40Z50_CELL_1_VOLTAGE               0x3F
-
-// #define BATT_SMBUS_BQ40Z80_CELL_7_VOLTAGE               0x3C
-// #define BATT_SMBUS_BQ40Z80_CELL_6_VOLTAGE               0x3D
-// #define BATT_SMBUS_BQ40Z80_CELL_5_VOLTAGE               0x3E
-// #define BATT_SMBUS_BQ40Z80_CELL_4_VOLTAGE               0x3F
-
-
-// #define BATT_SMBUS_MANUFACTURER_ACCESS                  0x00
-// #define BATT_SMBUS_MANUFACTURER_DATA                    0x23
-// #define BATT_SMBUS_MANUFACTURER_BLOCK_ACCESS            0x44
-
-// #define BATT_SMBUS_SECURITY_KEYS                        0x0035
-
-// #define BATT_SMBUS_DEVICE_TYPE                          0x0001
-// #define BATT_SMBUS_LIFETIME_FLUSH                       0x002E
-// #define BATT_SMBUS_LIFETIME_BLOCK_ONE                   0x0060
-// #define BATT_SMBUS_ENABLED_PROTECTIONS_A_ADDRESS        0x4938
-// #define BATT_SMBUS_SEAL                                 0x0030
-// #define BATT_SMBUS_DASTATUS1                            0x0071
-// #define BATT_SMBUS_DASTATUS2                            0x0072
-// #define BATT_SMBUS_DASTATUS3                            0x007B
-
-// #define BATT_SMBUS_ENABLED_PROTECTIONS_A_DEFAULT        0xcf
-// #define BATT_SMBUS_ENABLED_PROTECTIONS_A_CUV_DISABLED   0xce
 
 class Batmon : public device::I2C, public I2CSPIDriver<Batmon>
 {
@@ -118,9 +82,9 @@ private:
 
 	orb_advert_t _batt_topic{nullptr};
 
-	// void custom_method(const BusCLIArguments &cli) override;
+	void custom_method(const BusCLIArguments &cli) override;
 
-	int get_cell_voltages();
+	int get_batmon_startup_info();
 
 	/** @param _crit_thr Critical battery threshold param. */
 	float _crit_thr{0.f};

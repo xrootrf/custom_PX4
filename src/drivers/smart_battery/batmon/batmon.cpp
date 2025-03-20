@@ -57,10 +57,10 @@ uint8_t	BATT_SMBUS_ABSOLUTE_SOC           =              0x02;            ///< A
 uint8_t	BATT_SMBUS_REMAINING_CAPACITY     =              0x04;            ///< predicted remaining battery capacity as a percentage
 uint8_t	BATT_SMBUS_AVERAGE_TIME_TO_EMPTY  =              0x18;            ///< predicted remaining battery capacity based on the present rate of discharge in min
 uint8_t	BATT_SMBUS_CYCLE_COUNT            =              0x2C;            ///< number of cycles the battery has experienced
-uint8_t	BATT_SMBUS_MANUFACTURER_NAME      =              0x20;            ///< manufacturer name
-uint8_t	BATT_SMBUS_MANUFACTURER_NAME_SIZE =              21;            ///< manufacturer name data size
-uint8_t	BATT_SMBUS_MANUFACTURE_DATE       =              0x1B;            ///< manufacture date register
-uint8_t	BATT_SMBUS_SERIAL_NUMBER          =              0x28;            ///< serial number register
+// uint8_t	BATT_SMBUS_MANUFACTURER_NAME      =              0x20;            ///< manufacturer name
+// uint8_t	BATT_SMBUS_MANUFACTURER_NAME_SIZE =              21;            ///< manufacturer name data size
+// uint8_t	BATT_SMBUS_MANUFACTURE_DATE       =              0x1B;            ///< manufacture date register
+uint8_t	BATT_SMBUS_SERIAL_NUMBER          =              0x7E;            ///< serial number register
 uint8_t	BATT_SMBUS_STATE_OF_HEALTH        =              0x2E;            ///< State of Health. The SOH information of the battery in percentage of Design Capacity
 
 
@@ -110,10 +110,6 @@ Batmon::~Batmon()
 // 	// }
 
 
-// 	// Setting the BAT_SOURCE to "external"
-// 	int32_t battsource = 1;
-// 	param_set(param_find("BAT_SOURCE"), &battsource);
-
 // 	instance->ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
 
 // 	return instance;
@@ -148,7 +144,7 @@ void Batmon::RunImpl()
 	// 	new_report.voltage_cell_v[i] = 65535;
 	// }
 
-	// // Read current.
+	// Read current.
 	ret |= transfer(&BATT_SMBUS_CURRENT, sizeof(BATT_SMBUS_CURRENT), &resultL, sizeof(resultL));
 	ret |= transfer(&BATT_SMBUS_CURRENT+1, sizeof(BATT_SMBUS_CURRENT+1), &resultH, sizeof(resultH));
 
@@ -175,76 +171,81 @@ void Batmon::RunImpl()
 	ret |= transfer(&BATT_SMBUS_TEMP+1, sizeof(BATT_SMBUS_TEMP+1), &resultH, sizeof(resultH));
 	new_report.temperature = (((float)(resultL<<8)+resultH )/ 10.0f) + atmosphere::kAbsoluteNullCelsius;
 
-	// // Only publish if no errors.
-	// if (ret == PX4_OK) {
-	// 	// new_report.capacity = _batt_capacity;
-	// 	// new_report.cycle_count = _cycle_count;
-	// 	// new_report.serial_number = _serial_number;
-	// 	new_report.max_cell_voltage_delta = _max_cell_voltage_delta;
-	// 	// new_report.cell_count = _cell_count;
-	// 	// new_report.state_of_health = _state_of_health;
+	// Only publish if no errors.
+	if (ret == PX4_OK) {
+		new_report.capacity = _batt_capacity;
 
-	// 	// TODO: This critical setting should be set with BMS info or through a paramter
-	// 	// Setting a hard coded BATT_CELL_VOLTAGE_THRESHOLD_FAILED may not be appropriate
-	// 	//if (_lifetime_max_delta_cell_voltage > BATT_CELL_VOLTAGE_THRESHOLD_FAILED) {
-	// 	//	new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
+		ret |= transfer(&BATT_SMBUS_CYCLE_COUNT, sizeof(BATT_SMBUS_CYCLE_COUNT), &resultL, sizeof(resultL));
+		ret |= transfer(&BATT_SMBUS_CYCLE_COUNT+1, sizeof(BATT_SMBUS_CYCLE_COUNT+1), &resultH, sizeof(resultH));
+		new_report.cycle_count = (resultL<<8)+resultH;
 
-	// 	if (new_report.remaining > _low_thr) {
-	// 		new_report.warning = battery_status_s::BATTERY_WARNING_NONE;
+		new_report.serial_number = _serial_number;
 
-	// 	} else if (new_report.remaining > _crit_thr) {
-	// 		new_report.warning = battery_status_s::BATTERY_WARNING_LOW;
+		new_report.cell_count = _cell_count; 	//taken at startup
 
-	// 	} else if (new_report.remaining > _emergency_thr) {
-	// 		new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
+		ret |= transfer(&BATT_SMBUS_STATE_OF_HEALTH, sizeof(BATT_SMBUS_STATE_OF_HEALTH), &resultL, sizeof(resultL));
+		ret |= transfer(&BATT_SMBUS_STATE_OF_HEALTH+1, sizeof(BATT_SMBUS_STATE_OF_HEALTH+1), &resultH, sizeof(resultH));
+		new_report.state_of_health = (resultL<<8)+resultH;
 
-	// 	} else {
-	// 		new_report.warning = battery_status_s::BATTERY_WARNING_EMERGENCY;
-	// 	}
+		if (new_report.remaining > _low_thr) {
+			new_report.warning = battery_status_s::BATTERY_WARNING_NONE;
 
-	// 	// new_report.interface_error = perf_event_count(_interface->_interface_errors);
+		} else if (new_report.remaining > _crit_thr) {
+			new_report.warning = battery_status_s::BATTERY_WARNING_LOW;
 
+		} else if (new_report.remaining > _emergency_thr) {
+			new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
+
+		} else {
+			new_report.warning = battery_status_s::BATTERY_WARNING_EMERGENCY;
+		}
 		_battery_status_pub.publish(new_report);
 
 		_last_report = new_report;
-	// }
+	}
 }
 
-// int Batmon::get_batmon_startup_info()
-// {
-// 	int ret = PX4_OK;
+int Batmon::get_batmon_startup_info()
+{
+	int ret = PX4_OK;
 
-// 	// Read battery threshold params on startup.
-// 	param_get(param_find("BAT_CRIT_THR"), &_crit_thr);
-// 	param_get(param_find("BAT_LOW_THR"), &_low_thr);
-// 	param_get(param_find("BAT_EMERGEN_THR"), &_emergency_thr);
+	// Read battery threshold params on startup.
+	param_get(param_find("BAT_CRIT_THR"), &_crit_thr);
+	param_get(param_find("BAT_LOW_THR"), &_low_thr);
+	param_get(param_find("BAT_EMERGEN_THR"), &_emergency_thr);
 
-// 	// Read BatMon specific data	do later
-// 	// uint16_t num_cells;
-// 	// ret = transfer(BATT_SMBUS_CELL_COUNT, num_cells);
-// 	// _cell_count = math::min((uint8_t)num_cells, (uint8_t)MAX_CELL_COUNT);
+	//read manufacturer name or serial number; depending on that, do cell count accordingly
+	uint8_t result;
+	ret = transfer(&BATT_SMBUS_SERIAL_NUMBER, sizeof(BATT_SMBUS_SERIAL_NUMBER), &result, sizeof(result));
 
-// 	// int32_t _num_cells = num_cells;
-// 	// param_set(param_find("BAT_N_CELLS"), &_num_cells);
+	switch(result){
+		case 53:	//5S3P
+			num_cells = 5;
+			break;
+	}
 
-// 	return ret;
-// }
+	_cell_count = num_cells;
+	int32_t _num_cells = num_cells;
+	param_set(param_find("BAT_N_CELLS"), &_num_cells);
 
-// void Batmon::custom_method(const BusCLIArguments &cli)
-// {
-// 	switch(cli.custom1) {
-// 		case 1:
-// 			// TODO: analyze why these statements are not printed
-// 			// PX4_INFO("The manufacturer name: %s", _manufacturer_name);
-// 			// PX4_INFO("The manufacturer date: %d", _manufacture_date);
-// 			// PX4_INFO("The serial number: %d", _serial_number);
-// 			break;
-// 		case 4:
-// 			// suspend();
-// 			break;
-// 		case 5:
-// 			// resume();
-// 			break;
-// 	}
-// }
+	return ret;
+}
+
+void Batmon::custom_method(const BusCLIArguments &cli)
+{
+	switch(cli.custom1) {
+		case 1:
+			// TODO: analyze why these statements are not printed
+			// PX4_INFO("The manufacturer name: %s", _manufacturer_name);
+			// PX4_INFO("The manufacturer date: %d", _manufacture_date);
+			// PX4_INFO("The serial number: %d", _serial_number);
+			break;
+		case 4:
+			// suspend();
+			break;
+		case 5:
+			// resume();
+			break;
+	}
+}
 

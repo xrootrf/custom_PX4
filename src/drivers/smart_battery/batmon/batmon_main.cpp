@@ -60,7 +60,7 @@ $ batmon start -X -a 11 -b 4
 
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(true, false);
-	PRINT_MODULE_USAGE_PARAMS_I2C_ADDRESS(0x0B);
+	PRINT_MODULE_USAGE_PARAMS_I2C_ADDRESS(0x55);
 
 	PRINT_MODULE_USAGE_COMMAND_DESCR("man_info", "Prints manufacturer info.");
 	PRINT_MODULE_USAGE_COMMAND_DESCR("suspend", "Suspends the driver from rescheduling the cycle.");
@@ -73,8 +73,12 @@ $ batmon start -X -a 11 -b 4
 extern "C" __EXPORT int batmon_main(int argc, char *argv[])
 {
 	using ThisDriver = Batmon;
+	 
+	// Setting the BAT_SOURCE to "external"
+	int32_t battsource = 1;
+	param_set(param_find("BAT_SOURCE"), &battsource);
 	BusCLIArguments cli{true, false};
-	cli.default_i2c_frequency = 100000;
+	cli.default_i2c_frequency = 400000;
 
 	int32_t batmon_addr_batt1 = BATMON_DEFAULT_SMBUS_ADDR;
 	param_get(param_find("BATMON_ADDR_DFLT"), &batmon_addr_batt1);
@@ -102,15 +106,15 @@ extern "C" __EXPORT int batmon_main(int argc, char *argv[])
 
 	if (!strcmp(verb, "man_info")) {
 		cli.custom1 = 1;
-		return ThisDriver::module_custom_method(cli, iterator);
+		return ThisDriver::module_custom_method(cli);
 	}
 	if (!strcmp(verb, "suspend")) {
 		cli.custom1 = 4;
-		return ThisDriver::module_custom_method(cli, iterator);
+		return ThisDriver::module_custom_method(cli);
 	}
 	if (!strcmp(verb, "resume")) {
 		cli.custom1 = 5;
-		return ThisDriver::module_custom_method(cli, iterator);
+		return ThisDriver::module_custom_method(cli);
 	}
 
 	ThisDriver::print_usage();

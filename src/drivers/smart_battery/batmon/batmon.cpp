@@ -53,14 +53,10 @@
 uint8_t BATT_SMBUS_TEMP                   =              0x0C;            ///< temperature register
 uint8_t	BATT_SMBUS_VOLTAGE 		  =		 0x08;            ///< voltage register
 uint8_t	BATT_SMBUS_CURRENT                =              0x10;            ///< current register
-uint8_t	BATT_SMBUS_AVERAGE_CURRENT        =              0x0A;            ///< average current register
-uint8_t	BATT_SMBUS_MAX_ERROR              =              0x03;            ///< max error
 uint8_t	BATT_SMBUS_ABSOLUTE_SOC           =              0x02;            ///< Absolute State of charge
 uint8_t	BATT_SMBUS_REMAINING_CAPACITY     =              0x04;            ///< predicted remaining battery capacity as a percentage
-uint8_t	BATT_SMBUS_FULL_CHARGE_CAPACITY   =              0x06;            ///< capacity when fully charged
 uint8_t	BATT_SMBUS_AVERAGE_TIME_TO_EMPTY  =              0x18;            ///< predicted remaining battery capacity based on the present rate of discharge in min
 uint8_t	BATT_SMBUS_CYCLE_COUNT            =              0x2C;            ///< number of cycles the battery has experienced
-uint8_t	BATT_SMBUS_DESIGN_CAPACITY        =              0x3C;            ///< design capacity register
 uint8_t	BATT_SMBUS_MANUFACTURER_NAME      =              0x20;            ///< manufacturer name
 uint8_t	BATT_SMBUS_MANUFACTURER_NAME_SIZE =              21;            ///< manufacturer name data size
 uint8_t	BATT_SMBUS_MANUFACTURE_DATE       =              0x1B;            ///< manufacture date register
@@ -129,7 +125,8 @@ void Batmon::RunImpl()
 	int ret = PX4_OK;
 
 	// Temporary variable for storing SMBUS reads.
-	uint8_t result;		//prev was uint16_t
+	uint8_t resultL;		//prev was uint16_t
+	uint8_t resultH;
 
 	// Read data from sensor.
 	battery_status_s new_report = {};
@@ -138,55 +135,45 @@ void Batmon::RunImpl()
 
 	// Set time of reading.
 	new_report.timestamp = hrt_absolute_time();
-
 	new_report.connected = true;
 
-	ret |= transfer(&BATT_SMBUS_VOLTAGE, sizeof(BATT_SMBUS_VOLTAGE), &result, sizeof(result));
+	ret |= transfer(&BATT_SMBUS_VOLTAGE, sizeof(BATT_SMBUS_VOLTAGE), &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_VOLTAGE+1, sizeof(BATT_SMBUS_VOLTAGE+1), &resultH, sizeof(resultH));
+	new_report.voltage_v = (resultL<<8)+resultH;
 
 	PX4_INFO("batmon_ret %d", ret);
-	PX4_INFO("batmon_result %d", result);
+	PX4_INFO("batmon_resultL %d", resultL);
 
 	// for (int i = 0; i < _cell_count; i++) {
 	// 	new_report.voltage_cell_v[i] = 65535;
 	// }
 
-	// // Convert millivolts to volts.
-	// new_report.voltage_v = ((float)result) / 1000.0f;
-	// new_report.voltage_filtered_v = new_report.voltage_v;
-
 	// // Read current.
-	ret |= transfer(&BATT_SMBUS_CURRENT, sizeof(BATT_SMBUS_CURRENT), &result, sizeof(result));
+	ret |= transfer(&BATT_SMBUS_CURRENT, sizeof(BATT_SMBUS_CURRENT), &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_CURRENT+1, sizeof(BATT_SMBUS_CURRENT+1), &resultH, sizeof(resultH));
 
-	// new_report.current_a = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
-	// new_report.current_filtered_a = new_report.current_a;
+	new_report.current_a = (resultL<<8)+resultH;
 
-	// // Read average current.
-	ret |= transfer(&BATT_SMBUS_AVERAGE_CURRENT, sizeof(BATT_SMBUS_AVERAGE_CURRENT), &result, sizeof(result));
+	// Read average time to empty (minutes).
+	ret |= transfer(&BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, sizeof(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY) , &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_AVERAGE_TIME_TO_EMPTY+1, sizeof(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY+1) , &resultH, sizeof(resultH));
+	new_report.average_time_to_empty = (resultL<<8)+resultH;
 
-	// float average_current = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
+	// Read remaining capacity.
+	ret |= transfer(&BATT_SMBUS_REMAINING_CAPACITY, sizeof(BATT_SMBUS_REMAINING_CAPACITY), &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_REMAINING_CAPACITY+1, sizeof(BATT_SMBUS_REMAINING_CAPACITY+1), &resultH, sizeof(resultH));
+	new_report.remaining_capacity_wh = (resultL<<8)+resultH;
 
-	// new_report.current_average_a = average_current;
+	// Read Absolute SOC.
+	ret |= transfer(&BATT_SMBUS_ABSOLUTE_SOC, sizeof(BATT_SMBUS_ABSOLUTE_SOC), &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_ABSOLUTE_SOC+1, sizeof(BATT_SMBUS_ABSOLUTE_SOC+1), &resultH, sizeof(resultH));
+	// Normalize 0.0 to 1.0
+	new_report.remaining = ((float)(resultL<<8)+resultH) / 100.0f;
 
-	// // Read average time to empty (minutes).
-	// ret |= transfer(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, &result);
-	// new_report.average_time_to_empty = result;
-
-	// // Read remaining capacity.
-	// ret |= transfer(BATT_SMBUS_REMAINING_CAPACITY, &result);
-
-	// // Read Relative SOC.
-	// ret |= transfer(BATT_SMBUS_ABSOLUTE_SOC, &result);
-
-	// // Normalize 0.0 to 1.0
-	// new_report.remaining = (float)result / 100.0f;
-
-	// // Read Max Error
-	// //ret |= transfer(BATT_SMBUS_MAX_ERROR, result); //TODO: to be implemented
-	// //new_report.max_error = result;
-
-	// // Read battery temperature and covert to Celsius.
-	// ret |= transfer(BATT_SMBUS_TEMP, &result);
-	// new_report.temperature = ((float)result / 10.0f) + atmosphere::kAbsoluteNullCelsius;
+	// Read battery temperature and covert to Celsius.
+	ret |= transfer(&BATT_SMBUS_TEMP, sizeof(BATT_SMBUS_TEMP), &resultL, sizeof(resultL));
+	ret |= transfer(&BATT_SMBUS_TEMP+1, sizeof(BATT_SMBUS_TEMP+1), &resultH, sizeof(resultH));
+	new_report.temperature = (((float)(resultL<<8)+resultH )/ 10.0f) + atmosphere::kAbsoluteNullCelsius;
 
 	// // Only publish if no errors.
 	// if (ret == PX4_OK) {
@@ -217,7 +204,6 @@ void Batmon::RunImpl()
 
 	// 	// new_report.interface_error = perf_event_count(_interface->_interface_errors);
 
-	// 	int instance = 0;
 		_battery_status_pub.publish(new_report);
 
 		_last_report = new_report;

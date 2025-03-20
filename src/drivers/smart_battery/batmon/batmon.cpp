@@ -45,97 +45,84 @@
 #include <mathlib/mathlib.h>
 #include <lib/atmosphere/atmosphere.h>
 #include <parameters/param.h>
-#include <uORB/uORB.h>
-#include <uORB/topics/battery_status.h>
 #include <px4_platform_common/px4_config.h>
 #include <px4_platform_common/getopt.h>
 #include <px4_platform_common/module.h>
+#include <px4_platform_common/i2c_spi_buses.h>
+
+uint8_t BATT_SMBUS_TEMP                   =              0x0C;            ///< temperature register
+uint8_t	BATT_SMBUS_VOLTAGE 		  =		 0x08;            ///< voltage register
+uint8_t	BATT_SMBUS_CURRENT                =              0x10;            ///< current register
+uint8_t	BATT_SMBUS_AVERAGE_CURRENT        =              0x0A;            ///< average current register
+uint8_t	BATT_SMBUS_MAX_ERROR              =              0x03;            ///< max error
+uint8_t	BATT_SMBUS_ABSOLUTE_SOC           =              0x02;            ///< Absolute State of charge
+uint8_t	BATT_SMBUS_REMAINING_CAPACITY     =              0x04;            ///< predicted remaining battery capacity as a percentage
+uint8_t	BATT_SMBUS_FULL_CHARGE_CAPACITY   =              0x06;            ///< capacity when fully charged
+uint8_t	BATT_SMBUS_AVERAGE_TIME_TO_EMPTY  =              0x18;            ///< predicted remaining battery capacity based on the present rate of discharge in min
+uint8_t	BATT_SMBUS_CYCLE_COUNT            =              0x2C;            ///< number of cycles the battery has experienced
+uint8_t	BATT_SMBUS_DESIGN_CAPACITY        =              0x3C;            ///< design capacity register
+uint8_t	BATT_SMBUS_MANUFACTURER_NAME      =              0x20;            ///< manufacturer name
+uint8_t	BATT_SMBUS_MANUFACTURER_NAME_SIZE =              21;            ///< manufacturer name data size
+uint8_t	BATT_SMBUS_MANUFACTURE_DATE       =              0x1B;            ///< manufacture date register
+uint8_t	BATT_SMBUS_SERIAL_NUMBER          =              0x28;            ///< serial number register
+uint8_t	BATT_SMBUS_STATE_OF_HEALTH        =              0x2E;            ///< State of Health. The SOH information of the battery in percentage of Design Capacity
 
 
-extern "C" __EXPORT int batmon_main(int argc, char *argv[]);
+// extern "C" __EXPORT int batmon_main(int argc, char *argv[]);
 
-Batmon::Batmon(const I2CSPIDriverConfig &config, BATMAN *interface) :
-	I2CSPIDriver(config),
-	_interface(interface)
+Batmon::Batmon(const I2CSPIDriverConfig &config) :
+	I2C(config),
+	I2CSPIDriver(config)
 {
 }
 
-// Batmon::~Batmon()
+Batmon::~Batmon()
+{
+
+}
+
+// I2CSPIDriverBase *Batmon::instantiate(const I2CSPIDriverConfig &config, int runtime_instance)
 // {
-// 	// Unadvertise the distance sensor topic.
-// 	if (_battery_status_pub != nullptr) {
-// 		orb_unadvertise(_battery_status_pub);
+// 	BATMAN *interface = batmon_i2c_interface(config.bus, config.i2c_address, config.bus_frequency);
+
+
+// 	int32_t batmon_en_param = 0;
+// 	param_get(param_find("BATMON_DRIVER_EN"), &batmon_en_param);
+
+// 	if (batmon_en_param == 0) {	// BATMON_DRIVER_EN is set to disabled. Do not start driver
+// 		return nullptr;        // TODO: add option for autodetect I2C address
 // 	}
 
+// 	if (interface == nullptr) {
+// 		PX4_ERR("alloc failed");
+// 		return nullptr;
+// 	}
+
+// 	Batmon *instance = new Batmon(config, interface);
+
+// 	if (instance == nullptr) {
+// 		PX4_ERR("alloc failed");
+// 		return nullptr;
+// 	}
+
+// 	// int ret = instance->get_startup_info();
+// 	// ret |= instance->get_batmon_startup_info();
+
+// 	// if (ret != PX4_OK) {
+// 	// 	delete instance;
+// 	// 	return nullptr;
+// 	// }
+
+
+// 	// Setting the BAT_SOURCE to "external"
+// 	int32_t battsource = 1;
+// 	param_set(param_find("BAT_SOURCE"), &battsource);
+
+// 	instance->ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
+
+// 	return instance;
 // }
 
-I2CSPIDriverBase *Batmon::instantiate(const I2CSPIDriverConfig &config, int runtime_instance)
-{
-	BATMAN *interface = batmon_i2c_interface(config.bus, config.i2c_address, config.bus_frequency);
-
-
-	int32_t batmon_en_param = 0;
-	param_get(param_find("BATMON_DRIVER_EN"), &batmon_en_param);
-
-	if (batmon_en_param == 0) {	// BATMON_DRIVER_EN is set to disabled. Do not start driver
-		return nullptr;        // TODO: add option for autodetect I2C address
-	}
-
-	if (interface == nullptr) {
-		PX4_ERR("alloc failed");
-		return nullptr;
-	}
-
-	Batmon *instance = new Batmon(config, interface);
-
-	if (instance == nullptr) {
-		PX4_ERR("alloc failed");
-		return nullptr;
-	}
-
-	// int ret = instance->get_startup_info();
-	// ret |= instance->get_batmon_startup_info();
-
-	// if (ret != PX4_OK) {
-	// 	delete instance;
-	// 	return nullptr;
-	// }
-
-
-	// Setting the BAT_SOURCE to "external"
-	int32_t battsource = 1;
-	param_set(param_find("BAT_SOURCE"), &battsource);
-
-	instance->ScheduleOnInterval(BATT_SMBUS_MEASUREMENT_INTERVAL_US);
-
-	return instance;
-}
-
-void Batmon::print_usage()
-{
-	PRINT_MODULE_DESCRIPTION(
-		R"DESCR_STR(
-### Description
-Driver for SMBUS Communication with BatMon enabled smart-battery
-Setup/usage information: https://rotoye.com/batmon-tutorial/
-### Examples
-To start at address 0x0B, on bus 4
-$ batmon start -X -a 11 -b 4
-
-)DESCR_STR");
-
-	PRINT_MODULE_USAGE_NAME("batmon", "driver");
-
-	PRINT_MODULE_USAGE_COMMAND("start");
-	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(true, false);
-	PRINT_MODULE_USAGE_PARAMS_I2C_ADDRESS(0x0B);
-
-	PRINT_MODULE_USAGE_COMMAND_DESCR("man_info", "Prints manufacturer info.");
-	PRINT_MODULE_USAGE_COMMAND_DESCR("suspend", "Suspends the driver from rescheduling the cycle.");
-	PRINT_MODULE_USAGE_COMMAND_DESCR("resume", "Resumes the driver from suspension.");
-
-	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
-}
 
 void Batmon::RunImpl()
 {
@@ -154,168 +141,124 @@ void Batmon::RunImpl()
 
 	new_report.connected = true;
 
-	ret |= _interface->get_reg(BATT_SMBUS_VOLTAGE, &result);
+	ret |= transfer(&BATT_SMBUS_VOLTAGE, sizeof(BATT_SMBUS_VOLTAGE), &result, sizeof(result));
+
+	PX4_INFO("batmon_ret %d", ret);
+	PX4_INFO("batmon_result %d", result);
 
 	// for (int i = 0; i < _cell_count; i++) {
 	// 	new_report.voltage_cell_v[i] = 65535;
 	// }
 
-	// Convert millivolts to volts.
-	new_report.voltage_v = ((float)result) / 1000.0f;
-	new_report.voltage_filtered_v = new_report.voltage_v;
+	// // Convert millivolts to volts.
+	// new_report.voltage_v = ((float)result) / 1000.0f;
+	// new_report.voltage_filtered_v = new_report.voltage_v;
 
-	// Read current.
-	ret |= _interface->get_reg(BATT_SMBUS_CURRENT, &result);
+	// // Read current.
+	ret |= transfer(&BATT_SMBUS_CURRENT, sizeof(BATT_SMBUS_CURRENT), &result, sizeof(result));
 
-	new_report.current_a = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
-	new_report.current_filtered_a = new_report.current_a;
+	// new_report.current_a = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
+	// new_report.current_filtered_a = new_report.current_a;
 
-	// Read average current.
-	ret |= _interface->get_reg(BATT_SMBUS_AVERAGE_CURRENT, &result);
+	// // Read average current.
+	ret |= transfer(&BATT_SMBUS_AVERAGE_CURRENT, sizeof(BATT_SMBUS_AVERAGE_CURRENT), &result, sizeof(result));
 
-	float average_current = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
+	// float average_current = (-1.0f * ((float)(*(int8_t *)&result)) / 1000.0f);
 
-	new_report.current_average_a = average_current;
+	// new_report.current_average_a = average_current;
 
-	// Read average time to empty (minutes).
-	ret |= _interface->get_reg(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, &result);
-	new_report.average_time_to_empty = result;
+	// // Read average time to empty (minutes).
+	// ret |= transfer(BATT_SMBUS_AVERAGE_TIME_TO_EMPTY, &result);
+	// new_report.average_time_to_empty = result;
 
-	// Read remaining capacity.
-	ret |= _interface->get_reg(BATT_SMBUS_REMAINING_CAPACITY, &result);
+	// // Read remaining capacity.
+	// ret |= transfer(BATT_SMBUS_REMAINING_CAPACITY, &result);
 
-	// Read Relative SOC.
-	ret |= _interface->get_reg(BATT_SMBUS_ABSOLUTE_SOC, &result);
+	// // Read Relative SOC.
+	// ret |= transfer(BATT_SMBUS_ABSOLUTE_SOC, &result);
 
-	// Normalize 0.0 to 1.0
-	new_report.remaining = (float)result / 100.0f;
+	// // Normalize 0.0 to 1.0
+	// new_report.remaining = (float)result / 100.0f;
 
-	// Read Max Error
-	//ret |= _interface->get_reg(BATT_SMBUS_MAX_ERROR, result); //TODO: to be implemented
-	//new_report.max_error = result;
+	// // Read Max Error
+	// //ret |= transfer(BATT_SMBUS_MAX_ERROR, result); //TODO: to be implemented
+	// //new_report.max_error = result;
 
-	// Read battery temperature and covert to Celsius.
-	ret |= _interface->get_reg(BATT_SMBUS_TEMP, &result);
-	new_report.temperature = ((float)result / 10.0f) + atmosphere::kAbsoluteNullCelsius;
+	// // Read battery temperature and covert to Celsius.
+	// ret |= transfer(BATT_SMBUS_TEMP, &result);
+	// new_report.temperature = ((float)result / 10.0f) + atmosphere::kAbsoluteNullCelsius;
 
-	// Only publish if no errors.
-	if (ret == PX4_OK) {
-		// new_report.capacity = _batt_capacity;
-		// new_report.cycle_count = _cycle_count;
-		// new_report.serial_number = _serial_number;
-		new_report.max_cell_voltage_delta = _max_cell_voltage_delta;
-		// new_report.cell_count = _cell_count;
-		// new_report.state_of_health = _state_of_health;
+	// // Only publish if no errors.
+	// if (ret == PX4_OK) {
+	// 	// new_report.capacity = _batt_capacity;
+	// 	// new_report.cycle_count = _cycle_count;
+	// 	// new_report.serial_number = _serial_number;
+	// 	new_report.max_cell_voltage_delta = _max_cell_voltage_delta;
+	// 	// new_report.cell_count = _cell_count;
+	// 	// new_report.state_of_health = _state_of_health;
 
-		// TODO: This critical setting should be set with BMS info or through a paramter
-		// Setting a hard coded BATT_CELL_VOLTAGE_THRESHOLD_FAILED may not be appropriate
-		//if (_lifetime_max_delta_cell_voltage > BATT_CELL_VOLTAGE_THRESHOLD_FAILED) {
-		//	new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
+	// 	// TODO: This critical setting should be set with BMS info or through a paramter
+	// 	// Setting a hard coded BATT_CELL_VOLTAGE_THRESHOLD_FAILED may not be appropriate
+	// 	//if (_lifetime_max_delta_cell_voltage > BATT_CELL_VOLTAGE_THRESHOLD_FAILED) {
+	// 	//	new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
 
-		if (new_report.remaining > _low_thr) {
-			new_report.warning = battery_status_s::BATTERY_WARNING_NONE;
+	// 	if (new_report.remaining > _low_thr) {
+	// 		new_report.warning = battery_status_s::BATTERY_WARNING_NONE;
 
-		} else if (new_report.remaining > _crit_thr) {
-			new_report.warning = battery_status_s::BATTERY_WARNING_LOW;
+	// 	} else if (new_report.remaining > _crit_thr) {
+	// 		new_report.warning = battery_status_s::BATTERY_WARNING_LOW;
 
-		} else if (new_report.remaining > _emergency_thr) {
-			new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
+	// 	} else if (new_report.remaining > _emergency_thr) {
+	// 		new_report.warning = battery_status_s::BATTERY_WARNING_CRITICAL;
 
-		} else {
-			new_report.warning = battery_status_s::BATTERY_WARNING_EMERGENCY;
-		}
+	// 	} else {
+	// 		new_report.warning = battery_status_s::BATTERY_WARNING_EMERGENCY;
+	// 	}
 
-		// new_report.interface_error = perf_event_count(_interface->_interface_errors);
+	// 	// new_report.interface_error = perf_event_count(_interface->_interface_errors);
 
-		int instance = 0;
-		orb_publish_auto(ORB_ID(battery_status), &_batt_topic, &new_report, &instance);
+	// 	int instance = 0;
+		_battery_status_pub.publish(new_report);
 
 		_last_report = new_report;
-	}
+	// }
 }
 
-int Batmon::get_batmon_startup_info()
-{
-	int ret = PX4_OK;
+// int Batmon::get_batmon_startup_info()
+// {
+// 	int ret = PX4_OK;
 
-	// Read battery threshold params on startup.
-	param_get(param_find("BAT_CRIT_THR"), &_crit_thr);
-	param_get(param_find("BAT_LOW_THR"), &_low_thr);
-	param_get(param_find("BAT_EMERGEN_THR"), &_emergency_thr);
+// 	// Read battery threshold params on startup.
+// 	param_get(param_find("BAT_CRIT_THR"), &_crit_thr);
+// 	param_get(param_find("BAT_LOW_THR"), &_low_thr);
+// 	param_get(param_find("BAT_EMERGEN_THR"), &_emergency_thr);
 
-	// Read BatMon specific data	do later
-	// uint16_t num_cells;
-	// ret = _interface->get_reg(BATT_SMBUS_CELL_COUNT, num_cells);
-	// _cell_count = math::min((uint8_t)num_cells, (uint8_t)MAX_CELL_COUNT);
+// 	// Read BatMon specific data	do later
+// 	// uint16_t num_cells;
+// 	// ret = transfer(BATT_SMBUS_CELL_COUNT, num_cells);
+// 	// _cell_count = math::min((uint8_t)num_cells, (uint8_t)MAX_CELL_COUNT);
 
-	// int32_t _num_cells = num_cells;
-	// param_set(param_find("BAT_N_CELLS"), &_num_cells);
+// 	// int32_t _num_cells = num_cells;
+// 	// param_set(param_find("BAT_N_CELLS"), &_num_cells);
 
-	return ret;
-}
+// 	return ret;
+// }
 
-void Batmon::custom_method(const BusCLIArguments &cli)
-{
-	switch(cli.custom1) {
-		case 1:
-			// TODO: analyze why these statements are not printed
-			// PX4_INFO("The manufacturer name: %s", _manufacturer_name);
-			// PX4_INFO("The manufacturer date: %d", _manufacture_date);
-			// PX4_INFO("The serial number: %d", _serial_number);
-			break;
-		case 4:
-			// suspend();
-			break;
-		case 5:
-			// resume();
-			break;
-	}
-}
+// void Batmon::custom_method(const BusCLIArguments &cli)
+// {
+// 	switch(cli.custom1) {
+// 		case 1:
+// 			// TODO: analyze why these statements are not printed
+// 			// PX4_INFO("The manufacturer name: %s", _manufacturer_name);
+// 			// PX4_INFO("The manufacturer date: %d", _manufacture_date);
+// 			// PX4_INFO("The serial number: %d", _serial_number);
+// 			break;
+// 		case 4:
+// 			// suspend();
+// 			break;
+// 		case 5:
+// 			// resume();
+// 			break;
+// 	}
+// }
 
-
-extern "C" __EXPORT int batmon_main(int argc, char *argv[])
-{
-	using ThisDriver = Batmon;
-	BusCLIArguments cli{true, false};
-	cli.default_i2c_frequency = 400000;
-
-	int32_t batmon_addr_batt1 = BATMON_DEFAULT_SMBUS_ADDR;
-	param_get(param_find("BATMON_ADDR_DFLT"), &batmon_addr_batt1);
-	cli.i2c_address = batmon_addr_batt1;
-
-	const char *verb = cli.parseDefaultArguments(argc, argv);
-	if (!verb) {
-		ThisDriver::print_usage();
-		return -1;
-	}
-
-	BusInstanceIterator iterator(MODULE_NAME, cli, DRV_BAT_DEVTYPE_BATMON_SMBUS);
-
-	if (!strcmp(verb, "start")) {
-		return ThisDriver::module_start(cli, iterator);
-	}
-
-	if (!strcmp(verb, "stop")) {
-		return ThisDriver::module_stop(iterator);
-	}
-
-	if (!strcmp(verb, "status")) {
-		return ThisDriver::module_status(iterator);
-	}
-
-	if (!strcmp(verb, "man_info")) {
-		cli.custom1 = 1;
-		return ThisDriver::module_custom_method(cli, iterator);
-	}
-	if (!strcmp(verb, "suspend")) {
-		cli.custom1 = 4;
-		return ThisDriver::module_custom_method(cli, iterator);
-	}
-	if (!strcmp(verb, "resume")) {
-		cli.custom1 = 5;
-		return ThisDriver::module_custom_method(cli, iterator);
-	}
-
-	ThisDriver::print_usage();
-	return -1;
-}

@@ -36,10 +36,10 @@ px4_add_module(
 	MAIN batmon
 	COMPILE_FLAGS
 	SRCS
-		batmon_i2c.cpp
+		batmon_main.cpp
 		batmon.cpp
+		batmon.h
 
 	DEPENDS
-		drivers__smbus_sbs
-		drivers__smbus
+		px4_work_queue
 	)
